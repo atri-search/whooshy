@@ -1,0 +1,7 @@
+.coverage
+.vscode/
+.idea/
+Pipfile.lock
+htmlcov/
+.pytest_cache/
+__pycache__/
