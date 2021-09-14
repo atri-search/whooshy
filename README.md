@@ -57,7 +57,7 @@
 
 ## Roadmap
 
-The project is in the early stages of development. Thus, feel free to contribute and help MatchUp to grow up!
+The project is in the early stages of development. Thus, feel free to contribute and help WhooshY to grow up!
 
 See the [open issues](https://github.com/matchup-ir/whooshy/issues) for a list of proposed features (and known issues).
 
