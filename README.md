@@ -59,6 +59,11 @@
 
 The project is in the early stages of development. Thus, feel free to contribute and help WhooshY to grow up!
 
+Actual Roadmap is:
+1. Implement indexing
+2. Implement matching / scoring
+3. Integrate with matchup
+
 See the [open issues](https://github.com/matchup-ir/whooshy/issues) for a list of proposed features (and known issues).
 
 **OBS**: To propose new features or report bugs, check out the correct templates.
