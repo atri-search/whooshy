@@ -1,0 +1,12 @@
+*.pyc
+__pycache__/
+.tox/
+.vscode
+.idea
+build/
+dist/
+med/
+.index/
+src/whoosh_up.egg-info/
+src/script.py
+pypi_token
