@@ -469,29 +469,29 @@ class TF_IDF(WeightingModel):
     def scorer(self, searcher, fieldname, text, qf=1, query_context=None):
         # IDF is a global statistic, so get it from the top-level searcher
         parent = searcher.get_parent()  # Returns self if no parent
-
         idf = parent.idf(fieldname, text, self._idf_schema)  # idf global statistics
-        max_weight = searcher.term_info(fieldname, text).max_weight()
-        max_per_doc = searcher.max_doc_frequency(fieldname)
 
-        return TF_IDFScorer(idf, self._tf_schema, max_weight, max_per_doc)
+        max_weight = searcher.term_info(fieldname, text).max_weight()
+        doc_info = searcher.doc_info(fieldname)
+
+        return TF_IDFScorer(idf, self._tf_schema, max_weight, doc_info)
 
 
 class TF_IDFScorer(BaseScorer):
     """
     Basic formulation of TFIDF Similarity based on Lucene score function.
     """
-    def __init__(self, idf, tf_schema, max_weight, max_per_doc):
+    def __init__(self, idf, tf_schema, max_weight, doc_info):
         self._max_quality = max_weight * idf
         self._tf_schema = tf_schema
-        self._max_per_doc = max_per_doc
+        self._doc_info = doc_info
         self.idf = idf
 
     def supports_block_quality(self):
         return True
 
     def score(self, matcher):
-        max_freq = self._max_per_doc.get(matcher.id(), 1)
+        max_freq, _ = self._doc_info.get(matcher.id(), (1, 1))
         tf = self._tf_schema(matcher.weight(), max_freq)
         return tf * (self.idf ** 2)
 

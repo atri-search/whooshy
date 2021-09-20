@@ -137,7 +137,7 @@ class Searcher(object):
             self.parent = None
             self.schema = self.ixreader.schema
             self._idf_cache = {}
-            self._freq_cache = {}
+            self._doc_cache = {}
             self._filter_cache = {}
 
         if type(weighting) is type:
@@ -287,7 +287,7 @@ class Searcher(object):
 
         return self.context(needs_current=False, weighting=None)
 
-    def postings(self, fieldname, text, weighting=None, qf=1):
+    def postings(self, fieldname, text, weighting=None, qf=1, query_context=None):
         """Returns a :class:`whoosh.matching.Matcher` for the postings of the
         given term. Unlike the :func:`whoosh.reading.IndexReader.postings`
         method, this method automatically sets the scoring functions on the
@@ -295,7 +295,7 @@ class Searcher(object):
         """
 
         weighting = weighting or self.weighting
-        globalscorer = weighting.scorer(self, fieldname, text, qf=qf)
+        globalscorer = weighting.scorer(self, fieldname, text, qf=qf, query_context=query_context)
 
         if self.is_atomic():
             return self.ixreader.postings(fieldname, text, scorer=globalscorer)
@@ -338,22 +338,23 @@ class Searcher(object):
         cache[term] = idf
         return idf
 
-    def max_doc_frequency(self, fieldname):
-        """ Calculates the maximum frequency of a term in a given document. Generates a tuple of
-        (docnum, max_freq) for each document.
+    def doc_info(self, fieldname):
+        """ Calculates the maximum frequency of a term in a given document. Generates a dict like
+        docnum -> (max_freq, field_length) for each document. Returns the tuple.
         todo: increase efficiency
         """
-        cache = self._freq_cache
+        cache = self._doc_cache
         if fieldname in cache:
             return cache[fieldname]
 
-        field_freq = dict()
+        doc_info = dict()
         for fn, _, docnum, weight, _ in self.ixreader.iter_postings():
-            max_doc = field_freq.get(docnum, 0)
+            (max_doc, fl) = doc_info.get(docnum, (0, 0))
             if fieldname == fn:
-                field_freq[docnum] = weight if weight >= max_doc else max_doc
-        cache[fieldname] = field_freq
-        return field_freq
+                max_doc = weight if weight >= max_doc else max_doc
+                doc_info[docnum] = (max_doc, fl+1)
+        cache[fieldname] = doc_info
+        return doc_info
 
     def document(self, **kw):
         """Convenience method returns the stored fields of a document
