@@ -58,6 +58,23 @@ class WeightingModel(object):
         parent = searcher.get_parent()
         return idf_schema(parent, fieldname, text)
 
+    def tf(self, searcher, fieldname, docnum, tf_schema: TF = TF.frequency):
+        """Returns the document frequencies of the given (doc, term) pair.
+        """
+        all_tf = {}
+
+        doc_info = searcher.doc_info(fieldname)
+
+        max_freq, _ = doc_info.get(docnum, (1, 1))
+
+        matcher = searcher.vector_as("weight", docnum, fieldname)
+        for term, freq in matcher:
+
+            max_weight = searcher.term_info(fieldname, term).max_weight()
+            all_tf[term] = tf_schema(freq, max_weight)
+
+        return all_tf
+
     def scorer(self, searcher, fieldname, text, qf=1, query_context=None):
         """Returns an instance of :class:`whoosh.scoring.Scorer` configured
         for the given searcher, fieldname, and term text.
@@ -465,41 +482,81 @@ class TF_IDF(WeightingModel):
         """
         self._idf_schema = idf
         self._tf_schema = tf
+        self._tf_cache = {}
 
     def scorer(self, searcher, fieldname, text, qf=1, query_context=None):
         # IDF is a global statistic, so get it from the top-level searcher
-        parent = searcher.get_parent()  # Returns self if no parent
-        idf = parent.idf(fieldname, text, self._idf_schema)  # idf global statistics
+        idf_table = {c.text: searcher.idf(fieldname, c.text, self._idf_schema)
+                     for c in query_context}
 
-        max_weight = searcher.term_info(fieldname, text).max_weight()
-        doc_info = searcher.doc_info(fieldname)
+        return TF_IDFScorer(self, fieldname, text, searcher, query_context, self._tf_schema, idf_table)
 
-        return TF_IDFScorer(idf, self._tf_schema, max_weight, doc_info)
+    def tf(self, searcher, fieldname, docnum, tf_schema: TF = TF.frequency, context=None):
+        if docnum in self._tf_cache:
+            return self._tf_cache[docnum]
+
+        all_tf = super(TF_IDF, self).tf(searcher, fieldname, docnum, tf_schema)
+
+        if context:
+            terms = [t.text for t in context.subqueries]
+        else:
+            terms = all_tf.keys()
+
+        tf = {}
+        for term, freq in all_tf.items():
+            if term in terms:
+                tf[term] = freq
+
+        self._tf_cache[docnum] = tf
+
+        return tf
 
 
 class TF_IDFScorer(BaseScorer):
     """
     Basic formulation of TFIDF Similarity based on Lucene score function.
     """
-    def __init__(self, idf, tf_schema, max_weight, doc_info):
-        self._max_quality = max_weight * idf
-        self._tf_schema = tf_schema
-        self._doc_info = doc_info
-        self.idf = idf
+    def __init__(self, weighting, fieldname, text, searcher, context, tf_schema, idf_table):
+        self._fieldname = fieldname
+        self._searcher = searcher
+        self._weighting = weighting
+        self._context = context
+        self._text = text.decode(encoding="utf-8")
+        self.tf = tf_schema
+        self.idf_table = idf_table
 
     def supports_block_quality(self):
         return True
 
     def score(self, matcher):
-        max_freq, _ = self._doc_info.get(matcher.id(), (1, 1))
-        tf = self._tf_schema(matcher.weight(), max_freq)
-        return tf * (self.idf ** 2)
+        from math import sqrt
+
+        idf = self.idf_table.get(self._text, 1)
+
+        tf_all = self._weighting.tf(self._searcher, self._fieldname, matcher.id(), self.tf, self._context)
+        tf = tf_all.get(matcher.term()[-1].decode(encoding="utf-8"), 0)
+
+        norm_tf = 0.0
+        for text, f in tf_all.items():
+            norm_tf += (f * self.idf_table.get(text, 1)) ** 2
+        norm_tf = sqrt(norm_tf)
+
+        norm_idf = sqrt(sum([self.idf_table.get(c.text, 1) ** 2
+                             for c in self._context]))
+
+        # continuar a fazer outros modelos
+        return tf * (idf ** 2) / (norm_tf * norm_idf)
 
     def max_quality(self):
-        return self._max_quality
+        idf = self.idf_table[self._text]  # idf global statistics
+        max_weight = self._searcher.term_info(self._fieldname, self._text).max_weight()
+
+        return max_weight * idf
 
     def block_quality(self, matcher):
-        return matcher.block_max_weight() * self.idf
+        idf = self.idf_table[self._text]  # idf global statistics
+
+        return matcher.block_max_weight() * idf
 
 
 # Utility models
