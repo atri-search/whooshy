@@ -1014,7 +1014,7 @@ def test_column_scoring():
                            tag=fields.KEYWORD)
 
     class MyWeighting(scoring.WeightingModel):
-        def scorer(self, searcher, fieldname, text, qf=1):
+        def scorer(self, searcher, fieldname, text, qf=1, query_context=None):
             # Pass the searcher to the scorer so it can look up values in the
             # "count" field
             return MyScorer(searcher)

@@ -31,6 +31,7 @@ author: matt chaput and marcos pontes
 """
 from __future__ import division
 from math import log, pi
+from functools import lru_cache
 
 from whoosh.compat import iteritems
 from whoosh.weighting_schema import IDF, TF
@@ -50,6 +51,7 @@ class WeightingModel(object):
     """
 
     use_final = False
+    DOC_FREQUENCY_CACHE = 100
 
     def idf(self, searcher, fieldname, text, idf_schema: IDF = IDF.default):
         """Returns the inverse document frequency of the given term.
@@ -58,6 +60,7 @@ class WeightingModel(object):
         parent = searcher.get_parent()
         return idf_schema(parent, fieldname, text)
 
+    @lru_cache(maxsize=DOC_FREQUENCY_CACHE)
     def tf(self, searcher, fieldname, docnum, tf_schema: TF = TF.frequency):
         """Returns the document frequencies of the given (doc, term) pair.
         """
@@ -458,8 +461,52 @@ class Boolean(WeightingModel):
     def supports_block_quality(self):
         return True
 
-    def scorer(self, searcher, fieldname, text, qf=1):
-        return WeightScorer(1)
+    def scorer(self, searcher, fieldname, text, qf=1, query_context=None):
+        ql = 1.0
+        if query_context:
+            ql = len(query_context.subqueries)
+        return BooleanScorer(ql)
+
+
+class BooleanScorer(BaseScorer):
+    def __init__(self, ql):
+        self.ql = ql
+
+    def max_quality(self):
+        return 1.0
+
+    def block_quality(self, matcher):
+        return 1.0
+
+    def score(self, matcher):
+        return 1.0/self.ql if matcher.weight() > 0.0 else 0.0
+
+
+class Probabilistic(WeightingModel):
+
+    def supports_block_quality(self):
+        return True
+
+    def scorer(self, searcher, fieldname, text, qf=1, query_context=None):
+        N = searcher.doc_count()
+        ni = searcher.doc_frequency(fieldname, text)
+        return ProbabilisticScorer(N, ni)
+
+
+class ProbabilisticScorer(BaseScorer):
+
+    def __init__(self, N, ni):
+        self.N = N
+        self.ni = ni
+
+    def score(self, matcher):
+        return log((self.N + 0.5) / (self.ni + 0.5))
+
+    def max_quality(self):
+        return 1.0
+
+    def block_quality(self, matcher):
+        return 1.0
 
 
 class Frequency(WeightingModel):
@@ -469,6 +516,11 @@ class Frequency(WeightingModel):
 
 
 class TF_IDF(WeightingModel):
+    """
+    Using the VSM classic approach (which vector=True for the queried field), the first query is quite
+    slower because of the calculation of all normalization terms. The next queries will be as faster as
+    the original whoosh approach.
+    """
 
     def __init__(self, *, tf: TF = TF.frequency, idf: IDF = IDF.default):
         """
@@ -482,45 +534,23 @@ class TF_IDF(WeightingModel):
         """
         self._idf_schema = idf
         self._tf_schema = tf
-        self._tf_cache = {}
 
     def scorer(self, searcher, fieldname, text, qf=1, query_context=None):
         # IDF is a global statistic, so get it from the top-level searcher
         idf_table = {c.text: searcher.idf(fieldname, c.text, self._idf_schema)
                      for c in query_context}
 
-        return TF_IDFScorer(self, fieldname, text, searcher, query_context, self._tf_schema, idf_table)
-
-    def tf(self, searcher, fieldname, docnum, tf_schema: TF = TF.frequency, context=None):
-        if docnum in self._tf_cache:
-            return self._tf_cache[docnum]
-
-        all_tf = super(TF_IDF, self).tf(searcher, fieldname, docnum, tf_schema)
-
-        if context:
-            terms = [t.text for t in context.subqueries]
-        else:
-            terms = all_tf.keys()
-
-        tf = {}
-        for term, freq in all_tf.items():
-            if term in terms:
-                tf[term] = freq
-
-        self._tf_cache[docnum] = tf
-
-        return tf
+        return TF_IDFScorer(self, fieldname, text, searcher, self._tf_schema, idf_table)
 
 
 class TF_IDFScorer(BaseScorer):
     """
     Basic formulation of TFIDF Similarity based on Lucene score function.
     """
-    def __init__(self, weighting, fieldname, text, searcher, context, tf_schema, idf_table):
+    def __init__(self, weighting, fieldname, text, searcher, tf_schema, idf_table):
         self._fieldname = fieldname
         self._searcher = searcher
         self._weighting = weighting
-        self._context = context
         self._text = text.decode(encoding="utf-8")
         self.tf = tf_schema
         self.idf_table = idf_table
@@ -529,11 +559,17 @@ class TF_IDFScorer(BaseScorer):
         return True
 
     def score(self, matcher):
+        if self._searcher.has_vector(matcher.id(), self._fieldname):
+            return self._classic_vector_space_model(matcher)
+        else:
+            return matcher.weight() * self.idf_table.get(self._text, 1)  # whoosh default definition
+
+    def _classic_vector_space_model(self, matcher):
         from math import sqrt
 
         idf = self.idf_table.get(self._text, 1)
 
-        tf_all = self._weighting.tf(self._searcher, self._fieldname, matcher.id(), self.tf, self._context)
+        tf_all = self._weighting.tf(self._searcher, self._fieldname, matcher.id(), self.tf)
         tf = tf_all.get(matcher.term()[-1].decode(encoding="utf-8"), 0)
 
         norm_tf = 0.0
@@ -541,10 +577,8 @@ class TF_IDFScorer(BaseScorer):
             norm_tf += (f * self.idf_table.get(text, 1)) ** 2
         norm_tf = sqrt(norm_tf)
 
-        norm_idf = sqrt(sum([self.idf_table.get(c.text, 1) ** 2
-                             for c in self._context]))
+        norm_idf = sqrt(sum([v ** 2 for v in self.idf_table.values()]))
 
-        # continuar a fazer outros modelos
         return tf * (idf ** 2) / (norm_tf * norm_idf)
 
     def max_quality(self):
@@ -557,6 +591,7 @@ class TF_IDFScorer(BaseScorer):
         idf = self.idf_table[self._text]  # idf global statistics
 
         return matcher.block_max_weight() * idf
+
 
 
 # Utility models

@@ -132,7 +132,8 @@ class Term(qcore.Query):
             else:
                 w = context.weighting
 
-            m = searcher.postings(self.fieldname, text, weighting=w, query_context=context.top_query)
+            m = searcher.postings(self.fieldname, text, weighting=w,
+                                  query_context=context.top_query if context else None)
             if self.minquality:
                 m.set_min_quality(self.minquality)
             if self.boost != 1.0:

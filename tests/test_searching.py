@@ -750,7 +750,7 @@ def test_weighting():
 
     # Fake Weighting implementation
     class CommentWeighting(Weighting):
-        def scorer(self, searcher, fieldname, text, qf=1):
+        def scorer(self, searcher, fieldname, text, qf=1, query_context=None):
             return self.CommentScorer(searcher.stored_fields)
 
         class CommentScorer(BaseScorer):

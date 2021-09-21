@@ -7,6 +7,7 @@ build/
 dist/
 med/
 .index/
+.tests/
 src/whoosh_up.egg-info/
 src/script.py
 pypi_token
