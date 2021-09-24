@@ -27,20 +27,20 @@ class PyTest(TestCommand):
 
 if __name__ == "__main__":
     setup(
-        name="whoosh-up",
+        name="whooshy",
         version=versionstring(),
         package_dir={'': 'src'},
         packages=find_packages("src"),
 
-        author="Matt Chaput",
+        author="Matt Chaput & Marcos Pontes",
         author_email="mfprezende@gmail.com",
 
         description="Fast, pure-Python full text indexing, search, and spell checking library.",
-        long_description=open("README.md").read(),
+        long_description="Fork of Whoosh library",
 
         license="Two-clause BSD license",
         keywords="index search text spell",
-        url="http://github.com/matchup-ir/whoosh",
+        url="http://github.com/matchup-ir/whooshy",
 
         zip_safe=True,
         install_requires=['cached-property'],

@@ -32,6 +32,7 @@ author: matt chaput and marcos pontes
 from __future__ import division
 from math import log, pi
 from functools import lru_cache
+from typing import Union
 
 from whoosh.compat import iteritems
 from whoosh.weighting_schema import IDF, TF
@@ -522,7 +523,7 @@ class TF_IDF(WeightingModel):
     the original whoosh approach.
     """
 
-    def __init__(self, *, tf: TF = TF.frequency, idf: IDF = IDF.default):
+    def __init__(self, *, tf: Union[TF, str] = TF.frequency, idf: Union[IDF, str] = IDF.default):
         """
 
         >>> from whoosh import scoring
@@ -532,8 +533,8 @@ class TF_IDF(WeightingModel):
         :param idf: free parameter, indicates the idf schema. See the Vector Space Model literature.
         :param tf: free parameter, indicates the tf schema. See the Vector Space Model literature.
         """
-        self._idf_schema = idf
-        self._tf_schema = tf
+        self._idf_schema = idf if isinstance(idf, IDF) else IDF.get(idf)
+        self._tf_schema = tf if isinstance(tf, TF) else TF.get(tf)
 
     def scorer(self, searcher, fieldname, text, qf=1, query_context=None):
         # IDF is a global statistic, so get it from the top-level searcher
