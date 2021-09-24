@@ -120,15 +120,15 @@ class IDF(enum.Enum):
            6. unary
         """
         schema = schema.lower().strip()
-        if schema == cls.default.name:
+        if schema == 'default':
             return cls.default
-        elif schema == cls.inverse_frequency.name:
+        elif schema == 'inverse_frequency':
             return cls.inverse_frequency
-        elif schema == cls.inverse_frequency_smooth.name:
+        elif schema == 'inverse_frequency_smooth':
             return cls.inverse_frequency_smooth
-        elif schema == cls.inverse_frequency_max:
+        elif schema == 'inverse_frequency_max':
             return cls.inverse_frequency_max
-        elif schema == cls.probabilistic_inverse_frequency:
+        elif schema == 'probabilistic_inverse_frequency':
             return cls.probabilistic_inverse_frequency
         raise NotImplementedError(f"No IDF schema called {schema} found.")
 
@@ -184,16 +184,16 @@ class TF(enum.Enum):
            4. binary
         """
         schema = schema.lower().strip()
-        if schema == cls.default.name:
+        if schema == 'default':
             return cls.default
-        elif schema == cls.frequency.name:
+        elif schema == 'frequency':
             return cls.frequency
-        elif schema == cls.normalized_frequency.name:
+        elif schema == 'normalized_frequency':
             return cls.normalized_frequency
-        elif schema == cls.double_normalization.name:
+        elif schema == 'double_normalization':
             return cls.double_normalization
-        elif schema == cls.log_normalization.name:
+        elif schema == 'log_normalization':
             return cls.log_normalization
-        elif schema == cls.binary:
+        elif schema == 'binary':
             return cls.binary
         raise NotImplementedError(f"No TF schema called {schema} found.")
