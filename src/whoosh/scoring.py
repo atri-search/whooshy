@@ -533,26 +533,38 @@ class TF_IDF(WeightingModel):
         :param idf: free parameter, indicates the idf schema. See the Vector Space Model literature.
         :param tf: free parameter, indicates the tf schema. See the Vector Space Model literature.
         """
-        self._idf_schema = idf if isinstance(idf, IDF) else IDF.get(idf)
-        self._tf_schema = tf if isinstance(tf, TF) else TF.get(tf)
+        self._idf_schema = IDF.get(idf) if isinstance(idf, str) else idf
+        self._tf_schema = TF.get(tf) if isinstance(tf, str) else tf
+        self._tf_cache = {}
 
     def scorer(self, searcher, fieldname, text, qf=1, query_context=None):
         # IDF is a global statistic, so get it from the top-level searcher
         idf_table = {c.text: searcher.idf(fieldname, c.text, self._idf_schema)
                      for c in query_context}
 
-        return TF_IDFScorer(self, fieldname, text, searcher, self._tf_schema, idf_table)
+        return TF_IDFScorer(self, fieldname, text, searcher, query_context, self._tf_schema, idf_table)
+
+    def tf(self, searcher, fieldname, docnum, tf_schema: TF = TF.frequency, context=None):
+
+        all_tf = super(TF_IDF, self).tf(searcher, fieldname, docnum, tf_schema)
+
+        if context:
+            terms = {t.text for t in context.subqueries}
+            all_tf = {term: freq for term, freq in all_tf.items() if term in terms}
+
+        return all_tf
 
 
 class TF_IDFScorer(BaseScorer):
     """
     Basic formulation of TFIDF Similarity based on Lucene score function.
     """
-    def __init__(self, weighting, fieldname, text, searcher, tf_schema, idf_table):
+    def __init__(self, weighting, fieldname, text, searcher, query_context, tf_schema, idf_table):
         self._fieldname = fieldname
         self._searcher = searcher
         self._weighting = weighting
         self._text = text.decode(encoding="utf-8")
+        self._context = query_context
         self.tf = tf_schema
         self.idf_table = idf_table
 
@@ -570,7 +582,7 @@ class TF_IDFScorer(BaseScorer):
 
         idf = self.idf_table.get(self._text, 1)
 
-        tf_all = self._weighting.tf(self._searcher, self._fieldname, matcher.id(), self.tf)
+        tf_all = self._weighting.tf(self._searcher, self._fieldname, matcher.id(), self.tf, self._context)
         tf = tf_all.get(matcher.term()[-1].decode(encoding="utf-8"), 0)
 
         norm_tf = 0.0
@@ -593,9 +605,8 @@ class TF_IDFScorer(BaseScorer):
 
         return matcher.block_max_weight() * idf
 
-
-
 # Utility models
+
 
 class Weighting(WeightingModel):
     """This class provides backwards-compatibility with the old weighting
