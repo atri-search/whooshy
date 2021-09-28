@@ -34,6 +34,7 @@ from math import log, pi, sqrt
 from functools import lru_cache
 from typing import Union
 
+import whoosh.query
 from whoosh.compat import iteritems
 from whoosh.weighting_schema import IDF, TF
 
@@ -655,6 +656,56 @@ class BeliefNetworkScorer(TFIDFScorer):
         p_k = (1 / 2) ** self.t
 
         return p_dj_k * p_q_k * p_k
+
+
+class ExtendedBoolean(TF_IDF):
+    def __init__(self, p=3):
+        """
+
+        >>> from whoosh import scoring
+        >>> # You can set p value
+        >>> w = scoring.ExtendedBoolean(p=3)
+
+        """
+        super().__init__(tf=TF.normalized_frequency, idf=IDF.inverse_frequency)
+        self.p = p
+
+    def scorer(self, searcher, fieldname, text, qf=1, query_context=None):
+        # IDF is a global statistic, so get it from the top-level searcher
+        idf_table = {c.text: searcher.idf(fieldname, c.text, self._idf_schema)
+                     for c in query_context}
+
+        return ExtendedBooleanScorer(self, fieldname, text, searcher, query_context, self._tf_schema, idf_table,
+                                     self.p)
+
+    @staticmethod
+    def apply_function(score, p, qry_type):
+        from math import pow
+        if qry_type == 'AND':
+            return 1 - pow(score, 1/p)
+        return pow(score, 1/p)
+
+
+class ExtendedBooleanScorer(TFIDFScorer):
+    """
+    Basic formulation of ExtendedBoolean Similarity.
+    """
+
+    def __init__(self, weighting, fieldname, text, searcher, query_context, tf_schema, idf_table, p):
+        super().__init__(weighting, fieldname, text, searcher, query_context, tf_schema, idf_table)
+        self.p = p
+        self.qry_type = 'OR' if isinstance(query_context, whoosh.query.compound.Or) else 'AND'
+        self.len = len(query_context.subqueries)
+
+    def _approach(self, matcher):
+        tf_term, _, _ = self._tf_statistics(matcher, norm=False)
+        idf_term, _ = self._idf_statistics()
+
+        wij = tf_term * idf_term
+
+        if self.qry_type == 'AND':
+            return (1 - wij) ** self.p / self.len
+        return wij ** self.p / self.len
 
 
 # Utility models

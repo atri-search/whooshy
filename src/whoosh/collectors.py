@@ -714,10 +714,10 @@ class FilterCollector(WrappingCollector):
 
         for global_docnum in child.all_ids():
             if (
-                (_allow and global_docnum not in _allow) or
-                (_restrict and global_docnum in _restrict)
+                    (_allow and global_docnum not in _allow) or
+                    (_restrict and global_docnum in _restrict)
             ):
-                    continue
+                continue
             yield global_docnum
 
     def count(self):
@@ -737,7 +737,7 @@ class FilterCollector(WrappingCollector):
             for sub_docnum in child.matches():
                 global_docnum = self.offset + sub_docnum
                 if ((_allow is not None and global_docnum not in _allow)
-                    or (_restrict is not None and global_docnum in _restrict)):
+                        or (_restrict is not None and global_docnum in _restrict)):
                     filtered_count += 1
                     continue
                 child.collect(sub_docnum)
@@ -910,8 +910,8 @@ class CollapseCollector(WrappingCollector):
         # If the keyer or orderer require a valid matcher, tell the child
         # collector we need it
         needs_current = (context.needs_current
-                     or self.keyer.needs_current
-                     or (self.orderer and self.orderer.needs_current))
+                         or self.keyer.needs_current
+                         or (self.orderer and self.orderer.needs_current))
         self.child.prepare(top_searcher, q,
                            context.set(needs_current=needs_current))
 
@@ -1163,3 +1163,23 @@ class TermsCollector(WrappingCollector):
         r.termdocs = dict(self.termdocs)
         r.docterms = dict(self.docterms)
         return r
+
+
+class ApplyCollector(TopCollector):
+    """
+    Apply a function after score collected.
+    """
+
+    def __init__(self, f=None, limit=10, usequality=True, **kwargs):
+        """
+        :param limit: the maximum number of results to return.
+        :param usequality: whether to use block-quality optimizations. This may
+            be useful for debugging.
+        """
+
+        super().__init__(limit, usequality, **kwargs)
+        self._function = f
+
+    # ScoredCollector.collect calls this
+    def _collect(self, global_docnum, score):
+        super()._collect(global_docnum, self._function(score))

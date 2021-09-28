@@ -688,7 +688,7 @@ class Searcher(object):
             for docnum in method(self):
                 yield docnum
 
-    def collector(self, limit=10, sortedby=None, reverse=False, groupedby=None,
+    def collector(self, q=None, limit=10, sortedby=None, reverse=False, groupedby=None,
                   collapse=None, collapse_limit=1, collapse_order=None,
                   optimize=True, filter=None, mask=None, terms=False,
                   maptype=None, scored=True):
@@ -736,7 +736,12 @@ class Searcher(object):
         else:
             # A collector that uses block quality optimizations and a heap
             # queue to only collect the top N documents
-            c = collectors.TopCollector(limit, usequality=optimize)
+
+            function = self.__check_query_specific_application(q)
+            if function:
+                c = collectors.ApplyCollector(function, limit, usequality=optimize)
+            else:
+                c = collectors.TopCollector(limit, usequality=optimize)
 
         if groupedby:
             c = collectors.FacetCollector(c, groupedby, maptype=maptype)
@@ -803,7 +808,7 @@ class Searcher(object):
 
         # Call the collector() method to build a collector based on the
         # parameters passed to this method
-        c = self.collector(**kwargs)
+        c = self.collector(q, **kwargs)
         # Call the lower-level method to run the collector
         self.search_with_collector(q, c)
         # Return the results object from the collector
@@ -952,6 +957,18 @@ class Searcher(object):
         sqc = spelling.SimpleQueryCorrector(correctors, terms, aliases,
                                             maxdist=maxdist, prefix=prefix)
         return sqc.correct_query(q, qstring)
+
+    def __check_query_specific_application(self, q=None):
+        """
+        Some specific weighting models need an end treatment on it's score.
+        """
+        from whoosh.scoring import ExtendedBoolean
+        if q is not None:
+            if isinstance(self.weighting, ExtendedBoolean):
+                from whoosh.query.compound import Or
+                p = self.weighting.p
+                qry_type = 'OR' if isinstance(q, Or) else 'AND'
+                return lambda score: ExtendedBoolean.apply_function(score, p, qry_type)
 
 
 class Results(object):
