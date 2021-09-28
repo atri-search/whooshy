@@ -30,7 +30,7 @@ This module contains classes for scoring (and sorting) search results.
 author: matt chaput and marcos pontes
 """
 from __future__ import division
-from math import log, pi
+from math import log, pi, sqrt
 from functools import lru_cache
 from typing import Union
 
@@ -535,14 +535,13 @@ class TF_IDF(WeightingModel):
         """
         self._idf_schema = IDF.get(idf) if isinstance(idf, str) else idf
         self._tf_schema = TF.get(tf) if isinstance(tf, str) else tf
-        self._tf_cache = {}
 
     def scorer(self, searcher, fieldname, text, qf=1, query_context=None):
         # IDF is a global statistic, so get it from the top-level searcher
         idf_table = {c.text: searcher.idf(fieldname, c.text, self._idf_schema)
                      for c in query_context}
 
-        return TF_IDFScorer(self, fieldname, text, searcher, query_context, self._tf_schema, idf_table)
+        return TFIDFScorer(self, fieldname, text, searcher, query_context, self._tf_schema, idf_table)
 
     def tf(self, searcher, fieldname, docnum, tf_schema: TF = TF.frequency, context=None):
 
@@ -555,7 +554,7 @@ class TF_IDF(WeightingModel):
         return all_tf
 
 
-class TF_IDFScorer(BaseScorer):
+class TFIDFScorer(BaseScorer):
     """
     Basic formulation of TFIDF Similarity based on Lucene score function.
     """
@@ -573,26 +572,35 @@ class TF_IDFScorer(BaseScorer):
 
     def score(self, matcher):
         if self._searcher.has_vector(matcher.id(), self._fieldname):
-            return self._classic_vector_space_model(matcher)
+            return self._approach(matcher)
         else:
             return matcher.weight() * self.idf_table.get(self._text, 1)  # whoosh default definition
 
-    def _classic_vector_space_model(self, matcher):
-        from math import sqrt
+    def _approach(self, matcher):
 
+        tf_term, tf_all_terms, norm_tf = self._tf_statistics(matcher)
+        idf_term, norm_idf = self._idf_statistics()
+
+        return tf_term * (idf_term ** 2) / (norm_tf * norm_idf)
+
+    def _idf_statistics(self):
         idf = self.idf_table.get(self._text, 1)
+        norm_idf = sqrt(sum([v ** 2 for v in self.idf_table.values()]))
 
+        return idf, norm_idf
+
+    def _tf_statistics(self, matcher, norm=True):
         tf_all = self._weighting.tf(self._searcher, self._fieldname, matcher.id(), self.tf, self._context)
         tf = tf_all.get(matcher.term()[-1].decode(encoding="utf-8"), 0)
 
         norm_tf = 0.0
-        for text, f in tf_all.items():
-            norm_tf += (f * self.idf_table.get(text, 1)) ** 2
-        norm_tf = sqrt(norm_tf)
 
-        norm_idf = sqrt(sum([v ** 2 for v in self.idf_table.values()]))
+        if norm:
+            for text, f in tf_all.items():
+                norm_tf += (f * self.idf_table.get(text, 1)) ** 2
+            norm_tf = sqrt(norm_tf)
 
-        return tf * (idf ** 2) / (norm_tf * norm_idf)
+        return tf, tf_all, norm_tf
 
     def max_quality(self):
         idf = self.idf_table[self._text]  # idf global statistics
@@ -604,6 +612,50 @@ class TF_IDFScorer(BaseScorer):
         idf = self.idf_table[self._text]  # idf global statistics
 
         return matcher.block_max_weight() * idf
+
+
+class BeliefNetwork(TF_IDF):
+    def __init__(self, qf=1, *, tf: Union[TF, str] = TF.frequency, idf: Union[IDF, str] = IDF.default):
+        """
+
+        >>> from whoosh import scoring
+        >>> # You can set IDF and TF schemas
+        >>> w = scoring.BeliefNetwork(tf = TF.frequency, idf=IDF.inverse_frequency)
+
+        :param idf: free parameter, indicates the idf schema. See the Vector Space Model literature.
+        :param tf: free parameter, indicates the tf schema. See the Vector Space Model literature.
+        """
+        super().__init__(tf=tf, idf=idf)
+        self.qf = qf
+
+    def scorer(self, searcher, fieldname, text, qf=1, query_context=None):
+        # IDF is a global statistic, so get it from the top-level searcher
+        idf_table = {c.text: searcher.idf(fieldname, c.text, self._idf_schema)
+                     for c in query_context}
+
+        return BeliefNetworkScorer(self, fieldname, text, searcher, query_context, self._tf_schema, idf_table, self.qf)
+
+
+class BeliefNetworkScorer(TFIDFScorer):
+    """
+    Basic formulation of BeliefNetwork Similarity.
+    """
+
+    def __init__(self, weighting, fieldname, text, searcher, query_context, tf_schema, idf_table, qf=1):
+        super().__init__(weighting, fieldname, text, searcher, query_context, tf_schema, idf_table)
+        self.qf = qf
+        self.t = len(query_context.subqueries)
+
+    def _approach(self, matcher):
+        tf_term, tf_all_terms, norm_tf = self._tf_statistics(matcher)
+        idf_term, norm_idf = self._idf_statistics()
+
+        p_dj_k = tf_term * idf_term / norm_tf
+        p_q_k = self.qf * idf_term / norm_idf
+        p_k = (1 / 2) ** self.t
+
+        return p_dj_k * p_q_k * p_k
+
 
 # Utility models
 
