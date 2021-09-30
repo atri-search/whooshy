@@ -36,8 +36,6 @@ from math import log, pi, sqrt
 from functools import lru_cache
 from typing import Union, List, DefaultDict, Set
 
-import numpy as np
-
 import whoosh.query
 from whoosh.compat import iteritems
 from whoosh.weighting_schema import IDF, TF
