@@ -962,13 +962,22 @@ class Searcher(object):
         """
         Some specific weighting models need an end treatment on it's score.
         """
-        from whoosh.scoring import ExtendedBoolean
+        from whoosh.scoring import ExtendedBoolean, TF_IDF
         if q is not None:
+
             if isinstance(self.weighting, ExtendedBoolean):
+
                 from whoosh.query.compound import Or
+
                 p = self.weighting.p
                 qry_type = 'OR' if isinstance(q, Or) else 'AND'
-                return lambda score: ExtendedBoolean.apply_function(score, p, qry_type)
+
+                return lambda score, docnum: ExtendedBoolean.apply_function(score, p, qry_type)
+
+            else:
+
+                if isinstance(self.weighting, TF_IDF):
+                    return lambda score, docnum: self.weighting.apply_tf_normalization(score, docnum)
 
 
 class Results(object):

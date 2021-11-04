@@ -134,7 +134,7 @@ class WeightingModel(object):
 
         for term in term_repr:
             norm = normalization[term] if normalization[term] != 0 else 1.0
-            term_repr[term] = [score / sqrt(norm) for score in term_repr[term]]
+            term_repr[term] = [score / sqrt(norm) if sqrt(norm) != 0  else 0.0 for score in term_repr[term]]
 
         return term_repr, docs_to_minterm
 
@@ -450,7 +450,7 @@ class DFreeScorer(WeightLengthScorer):
         # Total term weight and total field length are global statistics, so
         # get them from the top-level searcher
         parent = searcher.get_parent()  # Returns self if no parent
-        self.cf = parent.weight(fieldname, text)
+        self.cf = parent.frequency(fieldname, text)
         self.fl = parent.field_length(fieldname)
 
         self.qf = qf
@@ -581,6 +581,7 @@ class TF_IDF(WeightingModel):
     slower because of the calculation of all normalization terms. The next queries will be as faster as
     the original whoosh approach.
     """
+    tf_normalize = True
 
     def __init__(self, *, tf: Union[TF, str] = TF.frequency, idf: Union[IDF, str] = IDF.default):
         """
@@ -592,8 +593,10 @@ class TF_IDF(WeightingModel):
         :param idf: free parameter, indicates the idf schema. See the Vector Space Model literature.
         :param tf: free parameter, indicates the tf schema. See the Vector Space Model literature.
         """
-        self._idf_table = {}
-        self._query_terms = []
+        self.idf_table = dict()
+        self.tf_table = defaultdict(dict)
+        self.query_terms = []
+
         self._idf_schema = IDF.get(idf) if isinstance(idf, str) else idf
         self._tf_schema = TF.get(tf) if isinstance(tf, str) else tf
 
@@ -602,14 +605,14 @@ class TF_IDF(WeightingModel):
         self.extract_idf_table(searcher, fieldname, query_context)
         self.all_terms(query_context)
 
-        return TFIDFScorer(self, fieldname, text, searcher, query_context, self._tf_schema, self._idf_table)
+        return TFIDFScorer(self, fieldname, text, searcher, query_context, self._tf_schema)
 
     def extract_idf_table(self, searcher, fieldname, query_context):
         if isinstance(query_context, whoosh.query.compound.CompoundQuery):
             for subquery in query_context:
                 self.extract_idf_table(searcher, fieldname, subquery)
         else:
-            self._idf_table[query_context.text] = searcher.idf(fieldname, query_context.text, self._idf_schema)
+            self.idf_table[query_context.text] = searcher.idf(fieldname, query_context.text, self._idf_schema)
 
     def all_terms(self, context):
         if context:
@@ -617,16 +620,23 @@ class TF_IDF(WeightingModel):
                 for subquery in context:
                     self.all_terms(subquery)
             else:
-                self._query_terms.append(context.text)
+                self.query_terms.append(context.text)
+
+    def apply_tf_normalization(self, score, docnum):
+        norm_tf = 0.0
+        for text, f in self.tf_table[docnum].items():
+            norm_tf += (f * self.idf_table.get(text, 1)) ** 2
+        return  score / sqrt(norm_tf) if norm_tf != 0 else 0.0
 
     def tf(self, searcher, fieldname, docnum, tf_schema: TF = TF.frequency, context=None):
+        # slow: usar só no último caso
 
         all_tf = super(TF_IDF, self).tf(searcher, fieldname, docnum, tf_schema)
 
-        if context and not self._query_terms:
+        if context and not self.query_terms:
             self.all_terms(context)
 
-        filtered_terms = {term: freq for term, freq in all_tf.items() if term in self._query_terms}
+        filtered_terms = {term: freq for term, freq in all_tf.items() if term in self.query_terms}
 
         return filtered_terms
 
@@ -635,14 +645,15 @@ class TFIDFScorer(BaseScorer):
     """
     Basic formulation of TFIDF Similarity based on Lucene score function.
     """
-    def __init__(self, weighting, fieldname, text, searcher, query_context, tf_schema, idf_table):
+    def __init__(self, weighting, fieldname, text, searcher, query_context, tf_schema):
         self._fieldname = fieldname
         self._searcher = searcher
         self._weighting = weighting
         self._text = text.decode(encoding="utf-8")
         self._context = query_context
-        self.tf = tf_schema
-        self.idf_table = idf_table
+        self.tf_schema = tf_schema
+        self.idf_table = weighting.idf_table
+        self.norm_idf = sqrt(sum([v ** 2 for v in self.idf_table.values()]))
 
     def supports_block_quality(self):
         return True
@@ -655,29 +666,22 @@ class TFIDFScorer(BaseScorer):
 
     def _approach(self, matcher):
 
-        tf_term, tf_all_terms, norm_tf = self._tf_statistics(matcher)
+        tf_term = self._tf_statistics(matcher)
         idf_term, norm_idf = self._idf_statistics()
 
-        return tf_term * (idf_term ** 2) / (norm_tf * norm_idf)
+        return tf_term * (idf_term ** 2) / norm_idf
 
     def _idf_statistics(self):
         idf = self.idf_table.get(self._text, 1)
-        norm_idf = sqrt(sum([v ** 2 for v in self.idf_table.values()]))
+        return idf, self.norm_idf
 
-        return idf, norm_idf
+    def _tf_statistics(self, matcher):
+        maxweight = self._searcher.term_info(self._fieldname, self._text).max_weight()
+        tf_term = self.tf_schema(matcher.weight(), maxweight)
 
-    def _tf_statistics(self, matcher, norm=True):
-        tf_all = self._weighting.tf(self._searcher, self._fieldname, matcher.id(), self.tf, self._context)
-        tf = tf_all.get(matcher.term()[-1].decode(encoding="utf-8"), 0)
+        self._weighting.tf_table[matcher.id()][self._text] = tf_term
 
-        norm_tf = 0.0
-
-        if norm:
-            for text, f in tf_all.items():
-                norm_tf += (f * self.idf_table.get(text, 1)) ** 2
-            norm_tf = sqrt(norm_tf)
-
-        return tf, tf_all, norm_tf
+        return tf_term
 
     def max_quality(self):
         idf = self.idf_table[self._text]  # idf global statistics
@@ -692,6 +696,8 @@ class TFIDFScorer(BaseScorer):
 
 
 class BeliefNetwork(TF_IDF):
+    tf_normalize = True
+
     def __init__(self, tf: Union[TF, str] = TF.frequency, idf: Union[IDF, str] = IDF.default):
         """
 
@@ -709,7 +715,7 @@ class BeliefNetwork(TF_IDF):
         # self.extract_idf_table(searcher, fieldname, query_context)
         self.extract_idf_table(searcher, fieldname, query_context)
         return BeliefNetworkScorer(self, fieldname, text, searcher, query_context,
-                                   self._tf_schema, self._idf_table, qf)
+                                   self._tf_schema, qf)
 
 
 class BeliefNetworkScorer(TFIDFScorer):
@@ -717,16 +723,16 @@ class BeliefNetworkScorer(TFIDFScorer):
     Basic formulation of BeliefNetwork Similarity.
     """
 
-    def __init__(self, weighting, fieldname, text, searcher, query_context, tf_schema, idf_table, qf=1):
-        super().__init__(weighting, fieldname, text, searcher, query_context, tf_schema, idf_table)
+    def __init__(self, weighting, fieldname, text, searcher, query_context, tf_schema, qf=1):
+        super().__init__(weighting, fieldname, text, searcher, query_context, tf_schema)
         self.qf = qf
         self.t = len(query_context.subqueries)
 
     def _approach(self, matcher):
-        tf_term, tf_all_terms, norm_tf = self._tf_statistics(matcher)
+        tf_term = self._tf_statistics(matcher)
         idf_term, norm_idf = self._idf_statistics()
 
-        p_dj_k = tf_term * idf_term / norm_tf
+        p_dj_k = tf_term * idf_term
         p_q_k = self.qf * idf_term / norm_idf
         p_k = (1 / 2) ** self.t
 
@@ -734,6 +740,8 @@ class BeliefNetworkScorer(TFIDFScorer):
 
 
 class ExtendedBoolean(TF_IDF):
+    tf_normalize = False
+
     def __init__(self, p=3):
         """
 
@@ -750,7 +758,7 @@ class ExtendedBoolean(TF_IDF):
         self.extract_idf_table(searcher, fieldname, query_context)
 
         return ExtendedBooleanScorer(self, fieldname, text, searcher, query_context, self._tf_schema,
-                                     self._idf_table, self.p)
+                                     self.p)
 
     @staticmethod
     def apply_function(score, p, qry_type):
@@ -765,14 +773,14 @@ class ExtendedBooleanScorer(TFIDFScorer):
     Basic formulation of ExtendedBoolean Similarity.
     """
 
-    def __init__(self, weighting, fieldname, text, searcher, query_context, tf_schema, idf_table, p):
-        super().__init__(weighting, fieldname, text, searcher, query_context, tf_schema, idf_table)
+    def __init__(self, weighting, fieldname, text, searcher, query_context, tf_schema, p):
+        super().__init__(weighting, fieldname, text, searcher, query_context, tf_schema)
         self.p = p
         self.qry_type = 'OR' if isinstance(query_context, whoosh.query.compound.Or) else 'AND'
         self.t = len(query_context.subqueries)
 
     def _approach(self, matcher):
-        tf_term, _, _ = self._tf_statistics(matcher, norm=False)
+        tf_term = self._tf_statistics(matcher)
         idf_term, _ = self._idf_statistics()
 
         wij = tf_term * idf_term
@@ -783,6 +791,9 @@ class ExtendedBooleanScorer(TFIDFScorer):
 
 
 class GeneralizedVSM(TF_IDF):
+
+    tf_normalize = True
+
     def __init__(self, *, tf: Union[TF, str] = TF.frequency, idf: Union[IDF, str] = IDF.default):
         """
 
@@ -802,12 +813,12 @@ class GeneralizedVSM(TF_IDF):
         self.extract_idf_table(searcher, fieldname, query_context)
         self.all_terms(query_context)
         try:
-            self.minterms, self.doc_to_minterm = self.minterm(searcher, fieldname, self._query_terms,
-                                                              self._idf_table, self._tf_schema)
+            self.minterms, self.doc_to_minterm = self.minterm(searcher, fieldname, self.query_terms, self.idf_table,
+                                                              self._tf_schema)
         except:
             self.minterms = self.doc_to_minterm = None
 
-        return GeneralizedVSMScorer(self, fieldname, text, searcher, query_context, self._tf_schema, self._idf_table)
+        return GeneralizedVSMScorer(self, fieldname, text, searcher, query_context, self._tf_schema)
 
 
 class GeneralizedVSMScorer(TFIDFScorer):
@@ -815,18 +826,22 @@ class GeneralizedVSMScorer(TFIDFScorer):
     Basic formulation of BeliefNetwork Similarity.
     """
 
-    def __init__(self, weighting, fieldname, text, searcher, query_context, tf_schema, idf_table):
-        super().__init__(weighting, fieldname, text, searcher, query_context, tf_schema, idf_table)
+    def __init__(self, weighting, fieldname, text, searcher, query_context, tf_schema):
+        super().__init__(weighting, fieldname, text, searcher, query_context, tf_schema)
 
     def _approach(self, matcher):
-        tf_term, tf_all_terms, norm_tf = self._tf_statistics(matcher)
-        idf_term, norm_idf = self._idf_statistics()
+        if self._weighting.minterms:
+            tf_term = self._tf_statistics(matcher)
+            idf_term, norm_idf = self._idf_statistics()
 
-        minterm = self._weighting.minterms[self._text]
-        idx = self._weighting.doc_to_minterm[matcher.id()]
+            minterm = self._weighting.minterms[self._text]
+            idx = self._weighting.doc_to_minterm[matcher.id()]
 
-        # todo: think about a way to compute correctly the minterms formula.
-        return (tf_term * (idf_term ** 2) / (norm_tf * norm_idf)) * minterm[idx]
+            # todo: think about a way to compute correctly the minterms formula.
+            return (tf_term * (idf_term ** 2) / norm_idf) * minterm[idx]
+        else:
+            return matcher.weight() * self.idf_table.get(self._text, 1)  # whoosh default definition
+
 
 # Utility models
 

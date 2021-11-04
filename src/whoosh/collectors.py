@@ -1182,4 +1182,4 @@ class ApplyCollector(TopCollector):
 
     # ScoredCollector.collect calls this
     def _collect(self, global_docnum, score):
-        super()._collect(global_docnum, self._function(score))
+        super()._collect(global_docnum, self._function(score, global_docnum))
