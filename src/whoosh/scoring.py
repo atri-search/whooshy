@@ -621,7 +621,7 @@ class TF_IDF(WeightingModel):
             if isinstance(context, whoosh.query.compound.CompoundQuery):
                 for subquery in context:
                     self.all_terms(subquery)
-            else:
+            elif isinstance(context, whoosh.query.terms.Term):
                 self.query_terms.append(context.text)
 
     def apply_tf_normalization(self, score, docnum):
