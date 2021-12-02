@@ -608,11 +608,13 @@ class TF_IDF(WeightingModel):
         return TFIDFScorer(self, fieldname, text, searcher, query_context, self._tf_schema)
 
     def extract_idf_table(self, searcher, fieldname, query_context):
-        if isinstance(query_context, whoosh.query.compound.CompoundQuery):
-            for subquery in query_context:
-                self.extract_idf_table(searcher, fieldname, subquery)
-        else:
-            self.idf_table[query_context.text] = searcher.idf(fieldname, query_context.text, self._idf_schema)
+        if query_context:
+            if isinstance(query_context, whoosh.query.compound.CompoundQuery):
+                for subquery in query_context:
+                    self.extract_idf_table(searcher, fieldname, subquery)
+            elif isinstance(query_context, whoosh.query.terms.Term):
+                self.idf_table[query_context.text] = searcher.idf(fieldname, query_context.text,
+                                                                  self._idf_schema)
 
     def all_terms(self, context):
         if context:
