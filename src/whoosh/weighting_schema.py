@@ -45,7 +45,7 @@ def _default_idf(searcher, fieldname, term):
     """
     n = searcher.doc_frequency(fieldname, term)
     dc = searcher.doc_count_all()
-    return log((dc + 1) / (n + 1)) + 1  # default whoosh schema
+    return log((dc + 1) / (n + 1)) + 1 if n + 1 != 0.0 else 0.0  # default whoosh schema
 
 
 def _unary(searcher, fieldname, term):
@@ -61,7 +61,7 @@ def _inverse_frequency(searcher, fieldname, term):
     """
     n = searcher.doc_frequency(fieldname, term)
     dc = searcher.doc_count_all()
-    return log(dc / n, 10)
+    return log(dc / n, 10) if n != 0.0 else 0.0
 
 
 def _inverse_frequency_smooth(searcher, fieldname, term):
@@ -70,7 +70,7 @@ def _inverse_frequency_smooth(searcher, fieldname, term):
     """
     n = searcher.doc_frequency(fieldname, term)
     dc = searcher.doc_count_all()
-    return log(1 + (dc / n), 10)
+    return log(1 + (dc / n), 10) if n != 0.0 else 0.0
 
 
 def _inverse_frequency_max(searcher, fieldname, term):
@@ -79,7 +79,7 @@ def _inverse_frequency_max(searcher, fieldname, term):
     """
     n = searcher.doc_frequency(fieldname, term)
     maxweight = searcher.term_info(fieldname, term).max_weight()
-    return log(1 + (maxweight / n), 10)
+    return log(1 + (maxweight / n), 10) if n != 0.0 else 0.0
 
 
 def _probabilistic_inverse_frequency(searcher, fieldname, term):
@@ -88,7 +88,7 @@ def _probabilistic_inverse_frequency(searcher, fieldname, term):
     """
     n = searcher.doc_frequency(fieldname, term)
     dc = searcher.doc_count_all()
-    return log((dc - n) / n, 10)
+    return log((dc - n) / n, 10) if n != 0.0 else 0.0
 
 
 class IDF(enum.Enum):
@@ -107,6 +107,7 @@ class IDF(enum.Enum):
         Call the function with arguments
         """
         self.value(*args)
+
 
     @classmethod
     def get(cls, schema: str):
@@ -142,7 +143,7 @@ def _frequency(weight, max_weight):
 
 
 def _normalized_frequency(weight, max_weight):
-    return weight / max_weight
+    return weight / max_weight if max_weight != 0.0 else 0.0
 
 
 def _log_normalization(weight, max_weight):
@@ -150,7 +151,7 @@ def _log_normalization(weight, max_weight):
 
 
 def _double_normalization(weight, max_weight):
-    return 0.5 + 0.5 * (weight / max_weight)
+    return 0.5 + 0.5 * (weight / max_weight if max_weight != 0.0 else 0.0)
 
 
 def _binary(weight, max_weight):
