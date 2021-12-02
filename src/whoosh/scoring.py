@@ -626,7 +626,7 @@ class TF_IDF(WeightingModel):
         norm_tf = 0.0
         for text, f in self.tf_table[docnum].items():
             norm_tf += (f * self.idf_table.get(text, 1)) ** 2
-        return  score / sqrt(norm_tf) if norm_tf != 0 else 0.0
+        return score / sqrt(norm_tf) if norm_tf != 0 else 0.0
 
     def tf(self, searcher, fieldname, docnum, tf_schema: TF = TF.frequency, context=None):
         # slow: usar só no último caso
@@ -733,7 +733,7 @@ class BeliefNetworkScorer(TFIDFScorer):
         idf_term, norm_idf = self._idf_statistics()
 
         p_dj_k = tf_term * idf_term
-        p_q_k = self.qf * idf_term / norm_idf
+        p_q_k = self.qf * idf_term / norm_idf if norm_idf != 0 else 0.0
         p_k = (1 / 2) ** self.t
 
         return p_dj_k * p_q_k * p_k
@@ -764,8 +764,8 @@ class ExtendedBoolean(TF_IDF):
     def apply_function(score, p, qry_type):
         from math import pow
         if qry_type == 'AND':
-            return 1 - pow(score, 1/p)
-        return pow(score, 1/p)
+            return 1 - pow(score, 1/p if p != 0 else 1)
+        return pow(score, 1/p if p != 0 else 1)
 
 
 class ExtendedBooleanScorer(TFIDFScorer):
@@ -838,7 +838,7 @@ class GeneralizedVSMScorer(TFIDFScorer):
             idx = self._weighting.doc_to_minterm[matcher.id()]
 
             # todo: think about a way to compute correctly the minterms formula.
-            return (tf_term * (idf_term ** 2) / norm_idf) * minterm[idx]
+            return (tf_term * (idf_term ** 2) / norm_idf if norm_idf != 0 else 0.0) * minterm[idx]
         else:
             return matcher.weight() * self.idf_table.get(self._text, 1)  # whoosh default definition
 
