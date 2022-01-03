@@ -595,7 +595,7 @@ class TF_IDF(WeightingModel):
         """
         self.idf_table = dict()
         self.tf_table = defaultdict(dict)
-        self.query_terms = []
+        self.query_terms = set()
 
         self._idf_schema = IDF.get(idf) if isinstance(idf, str) else idf
         self._tf_schema = TF.get(tf) if isinstance(tf, str) else tf
@@ -603,6 +603,8 @@ class TF_IDF(WeightingModel):
     def scorer(self, searcher, fieldname, text, qf=1, query_context=None):
         # IDF is a global statistic, so get it from the top-level searcher
         self.extract_idf_table(searcher, fieldname, query_context)
+        # Global context is needed for TF
+        self.query_terms = set()
         self.all_terms(query_context)
 
         return TFIDFScorer(self, fieldname, text, searcher, query_context, self._tf_schema)
@@ -622,17 +624,17 @@ class TF_IDF(WeightingModel):
                 for subquery in context:
                     self.all_terms(subquery)
             elif isinstance(context, whoosh.query.terms.Term):
-                self.query_terms.append(context.text)
+                self.query_terms.add(context.text)
 
     def apply_tf_normalization(self, score, docnum):
         norm_tf = 0.0
         for text, f in self.tf_table[docnum].items():
-            norm_tf += (f * self.idf_table.get(text, 1)) ** 2
+            if text in self.query_terms:
+                norm_tf += (f * self.idf_table.get(text, 1)) ** 2
         return score / sqrt(norm_tf) if norm_tf != 0 else 0.0
 
     def tf(self, searcher, fieldname, docnum, tf_schema: TF = TF.frequency, context=None):
         # slow: usar só no último caso
-
         all_tf = super(TF_IDF, self).tf(searcher, fieldname, docnum, tf_schema)
 
         if context and not self.query_terms:
@@ -641,7 +643,6 @@ class TF_IDF(WeightingModel):
         filtered_terms = {term: freq for term, freq in all_tf.items() if term in self.query_terms}
 
         return filtered_terms
-
 
 class TFIDFScorer(BaseScorer):
     """
@@ -655,7 +656,7 @@ class TFIDFScorer(BaseScorer):
         self._context = query_context
         self.tf_schema = tf_schema
         self.idf_table = weighting.idf_table
-        self.norm_idf = sqrt(sum([v ** 2 for v in self.idf_table.values()]))
+        self.norm_idf = sqrt(sum([v ** 2 for k, v in self.idf_table.items() if k in weighting.query_terms]))
 
     def supports_block_quality(self):
         return True
@@ -716,6 +717,11 @@ class BeliefNetwork(TF_IDF):
         # IDF is a global statistic, so get it from the top-level searcher
         # self.extract_idf_table(searcher, fieldname, query_context)
         self.extract_idf_table(searcher, fieldname, query_context)
+
+        # Global context is needed for TF
+        self.query_terms = set()
+        self.all_terms(query_context)
+
         return BeliefNetworkScorer(self, fieldname, text, searcher, query_context,
                                    self._tf_schema, qf)
 
@@ -758,6 +764,10 @@ class ExtendedBoolean(TF_IDF):
     def scorer(self, searcher, fieldname, text, qf=1, query_context=None):
         # IDF is a global statistic, so get it from the top-level searcher
         self.extract_idf_table(searcher, fieldname, query_context)
+
+         # Global context is needed for TF
+        self.query_terms = set()
+        self.all_terms(query_context)
 
         return ExtendedBooleanScorer(self, fieldname, text, searcher, query_context, self._tf_schema,
                                      self.p)
@@ -813,7 +823,11 @@ class GeneralizedVSM(TF_IDF):
     def scorer(self, searcher, fieldname, text, qf=1, query_context=None):
         # IDF is a global statistic, so get it from the top-level searcher
         self.extract_idf_table(searcher, fieldname, query_context)
+
+         # Global context is needed for TF
+        self.query_terms = set()
         self.all_terms(query_context)
+
         try:
             self.minterms, self.doc_to_minterm = self.minterm(searcher, fieldname, self.query_terms, self.idf_table,
                                                               self._tf_schema)
