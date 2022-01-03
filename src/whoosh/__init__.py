@@ -25,7 +25,7 @@
 # those of the authors and should not be interpreted as representing official
 # policies, either expressed or implied, of Matt Chaput.
 
-__version__ = (2, 8, 8)
+__version__ = (2, 8, 9)
 
 
 def versionstring(build=True, extra=True):
