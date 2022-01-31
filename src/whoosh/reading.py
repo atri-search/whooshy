@@ -32,7 +32,7 @@ from math import log
 from bisect import bisect_right
 from heapq import heapify, heapreplace, heappop, nlargest
 
-from cached_property import cached_property
+from functools import cached_property
 
 from whoosh import columns
 from whoosh.compat import abstractmethod
