@@ -1,0 +1,3 @@
+diskcache
+pytest~=7.0.1
+setuptools~=57.0.0
