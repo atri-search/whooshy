@@ -748,7 +748,7 @@ class ExtendedBooleanScorer(TFIDFScorer):
 class GeneralizedVSM(TF_IDF):
     tf_normalize = True
 
-    def __init__(self, *, tf: Union[TF, str] = TF.frequency, idf: Union[IDF, str] = IDF.default):
+    def __init__(self, *, mdb: str = None, tf: Union[TF, str] = TF.frequency, idf: Union[IDF, str] = IDF.default):
         """
 
         >>> from whoosh import scoring
@@ -757,8 +757,10 @@ class GeneralizedVSM(TF_IDF):
 
         :param idf: free parameter, indicates the idf schema. See the Vector Space Model literature.
         :param tf: free parameter, indicates the tf schema. See the Vector Space Model literature.
+        :param mdb: Minterm db base path. Example: 'mycol', 'mycol/body', etc.
         """
         super().__init__(tf=tf, idf=idf)
+        self.mdb = mdb
 
     def scorer(self, searcher, fieldname, text, qf=1, query_context=None):
         # IDF is a global statistic, so get it from the top-level searcher
@@ -767,7 +769,8 @@ class GeneralizedVSM(TF_IDF):
         self.query_terms = set()
         self.all_terms(query_context)
 
-        return GeneralizedVSMScorer(self, fieldname, text, searcher, query_context, self._tf_schema, self._idf_schema)
+        return GeneralizedVSMScorer(self, fieldname, text, searcher, query_context, self._tf_schema, self._idf_schema,
+                                    self.mdb)
 
 
 class GeneralizedVSMScorer(TFIDFScorer):
@@ -775,9 +778,10 @@ class GeneralizedVSMScorer(TFIDFScorer):
     Basic formulation of BeliefNetwork Similarity.
     """
 
-    def __init__(self, weighting, fieldname, text, searcher, query_context, tf_schema, idf_schema):
+    def __init__(self, weighting, fieldname, text, searcher, query_context, tf_schema, idf_schema, mdb):
         super().__init__(weighting, fieldname, text, searcher, query_context, tf_schema)
         self.idf_schema = idf_schema
+        self.mdb = mdb
 
     def _approach(self, matcher):
         if exist_minterm():
@@ -785,7 +789,7 @@ class GeneralizedVSMScorer(TFIDFScorer):
             idf_term, norm_idf = self._idf_statistics()
 
             return (tf_term * (idf_term ** 2) / norm_idf if norm_idf != 0 else 0.0) * \
-                   extract_minterm(self._text, matcher.id())
+                   extract_minterm(self.mdb, self._text, matcher.id())
         else:
             return matcher.weight() * self.idf_table.get(self._text, 1)  # whoosh default definition
 

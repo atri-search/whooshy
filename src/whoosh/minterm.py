@@ -102,12 +102,12 @@ def exist_minterm() -> bool:
 
 
 @lru_cache(maxsize=None)
-def extract_minterm(term, match_id):
+def extract_minterm(mdb, term, match_id):
     try:
         import diskcache as dc
 
-        docs_to_minterm = dc.Cache("tmp/docs_to_minterm")
-        minterm_db = dc.Cache("tmp/minterm_db")
+        docs_to_minterm = dc.Cache("tmp/{}/docs_to_minterm".format(mdb))
+        minterm_db = dc.Cache("tmp/{}/minterm_db".format(mdb))
 
         minterm = minterm_db.get(term)
         idx = docs_to_minterm.get(match_id)
@@ -122,15 +122,15 @@ def extract_minterm(term, match_id):
         raise Exception("Diskcache is required to use Minterms.extract()")
 
 
-def index_minterms(fieldname, ix, tf_schema=TF.frequency, idf_schema=IDF.inverse_frequency):
+def index_minterms(mdb, fieldname, ix, tf_schema=TF.frequency, idf_schema=IDF.inverse_frequency):
     """
     Build minterms for a certain fieldname. It must be executed after all indexing.
     """
     try:
         import diskcache as dc
 
-        docs_to_minterm = dc.Cache("tmp/docs_to_minterm")  # Dict[int, int]
-        minterm_db = dc.Cache("tmp/minterm_db")
+        docs_to_minterm = dc.Cache("tmp/{}/docs_to_minterm".format(mdb))  # Dict[int, int]
+        minterm_db = dc.Cache("tmp/{}/minterm_db".format(mdb))
 
         minterms: List[Minterm] = []
         document_term_correlations: Dict[int, Set[Correlation]] = dict()
