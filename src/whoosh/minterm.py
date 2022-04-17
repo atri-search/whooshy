@@ -102,24 +102,45 @@ def exist_minterm() -> bool:
 
 
 @lru_cache(maxsize=None)
-def extract_minterm(mdb, term, match_id):
+def get_minterm(mdb, term):
     try:
         import diskcache as dc
 
-        docs_to_minterm = dc.Cache("tmp/{}/docs_to_minterm".format(mdb))
-        minterm_db = dc.Cache("tmp/{}/minterm_db".format(mdb))
-
-        minterm = minterm_db.get(term)
-        idx = docs_to_minterm.get(match_id)
+        minterm_db = "tmp/{}/minterm_db".format(mdb)
+        minterm = __get_from_cache(minterm_db, term)
 
         # convert bytes to dict
-        if not (minterm and idx):
+        if not minterm:
             raise KeyError(f"Minterm for {term} not found.")
 
-        return minterm[idx]
+        return minterm
 
     except ImportError:
         raise Exception("Diskcache is required to use Minterms.extract()")
+
+
+@lru_cache(maxsize=None)
+def get_minterm_match(mdb, match_id):
+    try:
+        import diskcache as dc
+
+        docs_to_minterm = "tmp/{}/docs_to_minterm".format(mdb)
+        doc_idx = __get_from_cache(docs_to_minterm, match_id)
+
+        # convert bytes to dict
+        if not doc_idx:
+            raise KeyError(f"Minterm for {match_id} not found.")
+
+        return doc_idx
+
+    except ImportError:
+        raise Exception("Diskcache is required to use Minterms.extract()")
+
+
+@lru_cache(maxsize=None)
+def __get_from_cache(cache_name, term):
+    import diskcache as dc
+    return dc.Cache(cache_name).get(term)
 
 
 def index_minterms(mdb, fieldname, ix, tf_schema=TF.frequency, idf_schema=IDF.inverse_frequency):

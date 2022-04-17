@@ -38,7 +38,7 @@ from typing import Union
 
 import whoosh.query
 from whoosh.compat import iteritems
-from whoosh.minterm import exist_minterm, extract_minterm
+from whoosh.minterm import exist_minterm, get_minterm, get_minterm_match
 from whoosh.weighting_schema import IDF, TF
 
 
@@ -768,7 +768,6 @@ class GeneralizedVSM(TF_IDF):
 
         self.query_terms = set()
         self.all_terms(query_context)
-
         return GeneralizedVSMScorer(self, fieldname, text, searcher, query_context, self._tf_schema, self._idf_schema,
                                     self.mdb)
 
@@ -787,9 +786,13 @@ class GeneralizedVSMScorer(TFIDFScorer):
         if exist_minterm():
             tf_term = self._tf_statistics(matcher)
             idf_term, norm_idf = self._idf_statistics()
-
-            return (tf_term * (idf_term ** 2) / norm_idf if norm_idf != 0 else 0.0) * \
-                   extract_minterm(self.mdb, self._text, matcher.id())
+            try:
+                minterm = get_minterm(self.mdb, self._text)
+                match_index = get_minterm_match(self.mdb, self._text)
+                return (tf_term * (idf_term ** 2) / norm_idf if norm_idf != 0 else 0.0) * \
+                        minterm[match_index]
+            except KeyError:
+                return tf_term * (idf_term ** 2) / norm_idf if norm_idf != 0 else 0.0
         else:
             return matcher.weight() * self.idf_table.get(self._text, 1)  # whoosh default definition
 
