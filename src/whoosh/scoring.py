@@ -788,7 +788,7 @@ class GeneralizedVSMScorer(TFIDFScorer):
             idf_term, norm_idf = self._idf_statistics()
             try:
                 minterm = get_minterm(self.mdb, self._text)
-                match_index = get_minterm_match(self.mdb, self._text)
+                match_index = get_minterm_match(self.mdb, matcher.id())
                 return (tf_term * (idf_term ** 2) / norm_idf if norm_idf != 0 else 0.0) * \
                         minterm[match_index]
             except KeyError:
